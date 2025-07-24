@@ -1,6 +1,6 @@
-# BLIP-2 + EasyOCR + EXAONE 모델을 사용하여 이미지 분석 스크립트
+# InstructBLIP + EasyOCR + EXAONE 모델을 사용하여 이미지 분석 스크립트
 
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from PIL import Image
 import easyocr
@@ -9,16 +9,23 @@ import torch
 # 🔷 분석할 이미지 파일 경로
 image_path = "C:/test/dd.png"
 
-# 1️⃣ BLIP-2: 이미지 → 간단한 캡션
+# 1️⃣ InstructBLIP: 이미지 → 질문 기반 캡션 생성
 def image_to_caption(image_path):
-    print("[INFO] BLIP-2: 이미지 캡션 생성 중...")
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+    print("[INFO] InstructBLIP: 이미지 캡션 생성 중...")
 
+    # 모델 및 프로세서 로드
+    processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-flan-t5-xl")
+    model = InstructBlipForConditionalGeneration.from_pretrained("Salesforce/instructblip-flan-t5-xl")
+    model.to("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 이미지 로딩
     raw_image = Image.open(image_path).convert('RGB')
-    inputs = processor(raw_image, return_tensors="pt")
-    out = model.generate(**inputs)
-    caption = processor.decode(out[0], skip_special_tokens=True)
+    question = "이 그림에 대해 설명해줘."  # 자연스러운 질문 설정
+
+    inputs = processor(images=raw_image, text=question, return_tensors="pt").to(model.device)
+    output = model.generate(**inputs)
+    caption = processor.tokenizer.decode(output[0], skip_special_tokens=True)
+
     return caption
 
 # 2️⃣ OCR: 이미지 → 손글씨 텍스트
@@ -36,7 +43,7 @@ def exaone_detailed_analysis(caption, ocr_text):
     prompt = f"""
 다음은 어린이의 그림일기입니다.
 
-[BLIP-2 캡션]
+[InstructBLIP 캡션]
 {caption}
 
 [OCR 텍스트]
@@ -63,9 +70,10 @@ def exaone_detailed_analysis(caption, ocr_text):
     # EXAONE 모델 로드
     tokenizer = AutoTokenizer.from_pretrained("LGAI-EXAONE/EXAONE-3.0-7.8B-Instruct")
     model = AutoModelForCausalLM.from_pretrained("LGAI-EXAONE/EXAONE-3.0-7.8B-Instruct")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
 
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to("cuda" if torch.cuda.is_available() else "cpu")
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
     outputs = model.generate(
         **inputs,
@@ -87,7 +95,7 @@ def exaone_detailed_analysis(caption, ocr_text):
 if __name__ == "__main__":
     # 1. 이미지 → 캡션
     caption = image_to_caption(image_path)
-    print(f"\n[BLIP-2 캡션]\n{caption}")
+    print(f"\n[InstructBLIP 캡션]\n{caption}")
 
     # 2. OCR 텍스트 추출
     ocr_text = image_to_text(image_path)
